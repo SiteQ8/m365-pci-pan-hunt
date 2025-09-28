@@ -1,0 +1,167 @@
+// ======================================================================
+// PCI DSS – Credit Card PAN Unified Hunt Pack (Email + Cloud Apps + Endpoints)
+// ======================================================================
+
+// ----------------------------
+// 0) Parameters (edit here)
+// ----------------------------
+let lookback = 30d;
+let includeEmail = true;
+let includeCloudApps = true;
+let includeEndpoints = true;
+let maskOutput = true;  // mask PANs in output grid
+
+// -------------------------------------------
+// 1) Regex pattern & helpers for PAN detection
+// -------------------------------------------
+// Major brands: Visa, MasterCard (incl 2-series), AmEx, Discover, Diners, JCB
+let cc_regex = @"\b(?:4[0-9]{12}(?:[0-9]{3})?|(?:5[1-5][0-9]{14}|2[2-7][0-9]{14})|6(?:011|5[0-9]{2})[0-9]{12}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|(?:2131|1800|35\d{3})\d{11})\b";
+
+// Luhn mod-10 check
+let luhn_check = (cc:string) {
+    let n = strlen(cc);
+    let total = toscalar(
+        range i from 0 to n-1 step 1
+        | extend d = toint(substring(cc, n-1 - i, 1))
+        | extend v = iff(i % 2 == 1, iff(d*2 > 9, d*2 - 9, d*2), d)
+        | summarize sum(v)
+    );
+    total % 10 == 0
+};
+
+// Extract all candidates from text
+let extract_cc = (text:string) { extract_all(cc_regex, tostring(text)); };
+
+// Mask output
+let cc_mask = (cc:string) {
+    iff(maskOutput,
+        strcat(substring(cc,0,6), "******", substring(cc,strlen(cc)-4,4)),
+        cc)
+};
+
+// Standardized projection
+let shape = (Timestamp:datetime, Source:string, SubSource:string, PAN:string,
+             PrimaryEntity:string, SecondaryEntity:string, Details:string, EvidenceId:string) {
+    project Timestamp, Source, SubSource, PAN=cc_mask(PAN),
+            PrimaryEntity, SecondaryEntity, Details, EvidenceId
+};
+
+// -------------------------------------------
+// 2) Sources
+// -------------------------------------------
+
+// 2A) EMAIL — Subjects
+let Q_Email_Subject =
+EmailEvents
+| where Timestamp > ago(lookback)
+| extend candidates = extract_cc(Subject)
+| mv-expand PAN = candidates to typeof(string)
+| where luhn_check(PAN)
+| invoke shape(Timestamp, "Email", "Subject", PAN,
+               SenderFromAddress, tostring(make_set(RecipientEmailAddress)),
+               Subject, NetworkMessageId);
+
+// 2B) EMAIL — Attachment names
+let Q_Email_Attach =
+EmailAttachmentInfo
+| where Timestamp > ago(lookback)
+| extend candidates = extract_cc(FileName)
+| mv-expand PAN = candidates to typeof(string)
+| where luhn_check(PAN)
+| join kind=leftouter (
+    EmailEvents
+    | where Timestamp > ago(lookback)
+    | project NetworkMessageId, SenderFromAddress, Subject, RecipientEmailAddress, Timestamp
+) on NetworkMessageId
+| invoke shape(Timestamp, "Email", "AttachmentName", PAN,
+               SenderFromAddress, tostring(make_set(RecipientEmailAddress)),
+               strcat("File: ", FileName, " | Subj: ", Subject), NetworkMessageId);
+
+// 2C) EMAIL — URLs
+let Q_Email_Urls =
+EmailUrlInfo
+| where Timestamp > ago(lookback)
+| extend candidates = extract_cc(Url)
+| mv-expand PAN = candidates to typeof(string)
+| where luhn_check(PAN)
+| join kind=leftouter (
+    EmailEvents
+    | where Timestamp > ago(lookback)
+    | project NetworkMessageId, SenderFromAddress, Subject, Timestamp
+) on NetworkMessageId
+| invoke shape(Timestamp, "Email", "Url", PAN,
+               SenderFromAddress, Url,
+               strcat("Subj: ", Subject), NetworkMessageId);
+
+// 2D) CLOUD APPS — SP/OD/Teams activity
+let Q_CloudApps =
+CloudAppEvents
+| where Timestamp > ago(lookback)
+| extend Scan = strcat(ObjectName, " ", tostring(Description), " ", tostring(AdditionalFields))
+| extend candidates = extract_cc(Scan)
+| mv-expand PAN = candidates to typeof(string)
+| where luhn_check(PAN)
+| invoke shape(Timestamp, "CloudApp", "Object/Desc/Fields", PAN,
+               strcat(AccountDisplayName, " @ ", Application), ObjectName,
+               tostring(Description), tostring(EventOriginalType));
+
+// 2E) ENDPOINT — Process command lines
+let Q_Edr_Process =
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| extend Scan = strcat(ProcessCommandLine, " ", InitiatingProcessCommandLine)
+| extend candidates = extract_cc(Scan)
+| mv-expand PAN = candidates to typeof(string)
+| where luhn_check(PAN)
+| invoke shape(Timestamp, "Endpoint", "Process", PAN,
+               DeviceName, AccountName,
+               strcat(FileName, " :: ", ProcessCommandLine), tostring(ProcessId));
+
+// 2F) ENDPOINT — File names & paths
+let Q_Edr_Files =
+DeviceFileEvents
+| where Timestamp > ago(lookback)
+| extend Scan = strcat(FolderPath, "\", FileName, " ", InitiatingProcessCommandLine)
+| extend candidates = extract_cc(Scan)
+| mv-expand PAN = candidates to typeof(string)
+| where luhn_check(PAN)
+| invoke shape(Timestamp, "Endpoint", "FileEvent", PAN,
+               DeviceName, InitiatingProcessFileName,
+               strcat(ActionType, " :: ", FolderPath, "\", FileName), tostring(SHA1));
+
+// 2G) ENDPOINT — Network (URLs/IPs with process)
+let Q_Edr_Net =
+DeviceNetworkEvents
+| where Timestamp > ago(lookback)
+| extend Scan = strcat(RemoteUrl, " ", Url, " ", InitiatingProcessCommandLine)
+| extend candidates = extract_cc(Scan)
+| mv-expand PAN = candidates to typeof(string)
+| where luhn_check(PAN)
+| invoke shape(Timestamp, "Endpoint", "Network", PAN,
+               DeviceName, coalesce(RemoteUrl, tostring(RemoteIP)),
+               strcat(Protocol, ":", tostring(RemotePort), " :: ", InitiatingProcessFileName), tostring(RemoteIP));
+
+// -------------------------------------------
+// 3) Unified detailed results
+// -------------------------------------------
+union
+(iff(includeEmail, Q_Email_Subject, Q_Email_Subject | where false)),
+(iff(includeEmail, Q_Email_Attach,   Q_Email_Attach   | where false)),
+(iff(includeEmail, Q_Email_Urls,     Q_Email_Urls     | where false)),
+(iff(includeCloudApps, Q_CloudApps,  Q_CloudApps      | where false)),
+(iff(includeEndpoints, Q_Edr_Process, Q_Edr_Process   | where false)),
+(iff(includeEndpoints, Q_Edr_Files,   Q_Edr_Files     | where false)),
+(iff(includeEndpoints, Q_Edr_Net,     Q_Edr_Net       | where false))
+| order by Timestamp desc
+
+// (Optional) Daily summary
+/*
+union Q_Email_Subject, Q_Email_Attach, Q_Email_Urls, Q_CloudApps, Q_Edr_Process, Q_Edr_Files, Q_Edr_Net
+| summarize
+    Hits = count(),
+    UniqueEntities = dcount(PrimaryEntity),
+    FirstSeen = min(Timestamp),
+    LastSeen  = max(Timestamp)
+  by PAN, Source
+| order by LastSeen desc
+*/
