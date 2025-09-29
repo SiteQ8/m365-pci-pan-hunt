@@ -30,7 +30,8 @@ Refer to the scripts or documentation for running specific hunts or searches. Fo
 
 ## License
 
-No license information is currently provided.
+This project is open source and licensed under the MIT License.  
+See the LICENSE file for details.
 
 ## Author
 
