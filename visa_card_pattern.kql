@@ -1,0 +1,5 @@
+// Visa card pattern detection in audit logs
+
+AuditLogs
+| where LogMessage matches regex @"4[0-9]{12}(?:[0-9]{3})?"
+| project Timestamp, User, LogMessage

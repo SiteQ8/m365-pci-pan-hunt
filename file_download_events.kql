@@ -1,0 +1,6 @@
+// File download events with possible PCI/PAN keywords
+
+FileEvents
+| where ActionType == "Download"
+| where FileName contains "PCI" or FileName contains "credit card"
+| project Timestamp, User, FileName, ActionType
