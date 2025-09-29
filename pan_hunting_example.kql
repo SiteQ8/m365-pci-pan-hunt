@@ -1,0 +1,13 @@
+// Example KQL for hunting PCI/PAN data in Microsoft 365 logs
+
+EmailEvents
+| where EmailSubject matches regex @"\b(?:\d[ -]*?){13,16}\b"
+| project Timestamp, Sender, Recipient, EmailSubject
+
+SharePointFileEvents
+| where FileName contains "PCI" or FileName contains "credit card"
+| project Timestamp, User, FileName, SiteUrl
+
+TeamsMessages
+| where MessageBody matches regex @"\b(?:\d[ -]*?){13,16}\b"
+| project Timestamp, Sender, MessageBody

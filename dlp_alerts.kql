@@ -1,0 +1,5 @@
+// DLP (Data Loss Prevention) alerts for PCI/PAN data in Microsoft 365
+
+DLPEvents
+| where AlertType contains "Credit Card"
+| project Timestamp, User, AlertType, FileName, SiteUrl
