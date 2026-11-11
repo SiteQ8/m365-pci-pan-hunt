@@ -1,5 +1,5 @@
 // ======================================================================
-// PCI DSS – Credit Card PAN Unified Hunt Pack (Email + Cloud Apps + Endpoints)
+// PCI DSS: Credit Card PAN Unified Hunt Pack (Email + Cloud Apps + Endpoints)
 // ======================================================================
 
 // ----------------------------
@@ -50,7 +50,7 @@ let shape = (Timestamp:datetime, Source:string, SubSource:string, PAN:string,
 // 2) Sources
 // -------------------------------------------
 
-// 2A) EMAIL — Subjects
+// 2A) EMAIL: Subjects
 let Q_Email_Subject =
 EmailEvents
 | where Timestamp > ago(lookback)
@@ -61,7 +61,7 @@ EmailEvents
                SenderFromAddress, tostring(make_set(RecipientEmailAddress)),
                Subject, NetworkMessageId);
 
-// 2B) EMAIL — Attachment names
+// 2B) EMAIL: Attachment names
 let Q_Email_Attach =
 EmailAttachmentInfo
 | where Timestamp > ago(lookback)
@@ -77,7 +77,7 @@ EmailAttachmentInfo
                SenderFromAddress, tostring(make_set(RecipientEmailAddress)),
                strcat("File: ", FileName, " | Subj: ", Subject), NetworkMessageId);
 
-// 2C) EMAIL — URLs
+// 2C) EMAIL: URLs
 let Q_Email_Urls =
 EmailUrlInfo
 | where Timestamp > ago(lookback)
@@ -93,7 +93,7 @@ EmailUrlInfo
                SenderFromAddress, Url,
                strcat("Subj: ", Subject), NetworkMessageId);
 
-// 2D) CLOUD APPS — SP/OD/Teams activity
+// 2D) CLOUD APPS: SP/OD/Teams activity
 let Q_CloudApps =
 CloudAppEvents
 | where Timestamp > ago(lookback)
@@ -105,7 +105,7 @@ CloudAppEvents
                strcat(AccountDisplayName, " @ ", Application), ObjectName,
                tostring(Description), tostring(EventOriginalType));
 
-// 2E) ENDPOINT — Process command lines
+// 2E) ENDPOINT: Process command lines
 let Q_Edr_Process =
 DeviceProcessEvents
 | where Timestamp > ago(lookback)
@@ -117,7 +117,7 @@ DeviceProcessEvents
                DeviceName, AccountName,
                strcat(FileName, " :: ", ProcessCommandLine), tostring(ProcessId));
 
-// 2F) ENDPOINT — File names & paths
+// 2F) ENDPOINT: File names & paths
 let Q_Edr_Files =
 DeviceFileEvents
 | where Timestamp > ago(lookback)
@@ -129,7 +129,7 @@ DeviceFileEvents
                DeviceName, InitiatingProcessFileName,
                strcat(ActionType, " :: ", FolderPath, "\", FileName), tostring(SHA1));
 
-// 2G) ENDPOINT — Network (URLs/IPs with process)
+// 2G) ENDPOINT: Network (URLs/IPs with process)
 let Q_Edr_Net =
 DeviceNetworkEvents
 | where Timestamp > ago(lookback)
